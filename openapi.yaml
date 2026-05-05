@@ -1,0 +1,371 @@
+openapi: 3.0.3
+info:
+  title: SmartKart (RDT Connectors) API
+  description: |
+    OpenAPI definition of the three currently-published SmartKart endpoints.
+    See <https://github.com/Stronger-eCommerce/smartkart-api> for the typed
+    TypeScript client.
+  version: 0.1.0
+  license:
+    name: MIT
+servers:
+  - url: http://rdtapi.com/RDTConnectrosAPI
+    description: Production (note "Connectros" typo is upstream-mandated)
+security:
+  - TokenAuth: []
+components:
+  securitySchemes:
+    TokenAuth:
+      type: apiKey
+      in: header
+      name: Token
+  schemas:
+    ApiError:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        description:
+          type: string
+        errors:
+          type: array
+          items:
+            type: string
+          nullable: true
+        data:
+          nullable: true
+    PaginatedRequestBase:
+      type: object
+      required: [pageSize, pageNumber]
+      properties:
+        pageSize:
+          type: integer
+          minimum: 0
+        pageNumber:
+          type: integer
+          minimum: 1
+    IsoDateTime:
+      type: string
+      description: ISO-8601 date-time string with no timezone, e.g. "2026-05-06T15:00:00".
+      example: "2026-05-06T15:00:00"
+    ItemStatus:
+      type: string
+      enum: [Active, Inactive]
+      nullable: true
+    ItemsFilter:
+      type: object
+      required: [storeID]
+      properties:
+        storeID:
+          type: integer
+        itemID:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        modelNumber:
+          type: string
+          nullable: true
+        upc:
+          type: string
+          nullable: true
+        itemType:
+          type: string
+          nullable: true
+        itemStatus:
+          $ref: "#/components/schemas/ItemStatus"
+        lastDateModified:
+          $ref: "#/components/schemas/IsoDateTime"
+    GetItemsRequest:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedRequestBase"
+        - type: object
+          required: [itemsFilter]
+          properties:
+            itemsFilter:
+              $ref: "#/components/schemas/ItemsFilter"
+    Item:
+      type: object
+      required: [itemID]
+      additionalProperties: true
+      properties:
+        itemID:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        modelNumber:
+          type: string
+        upc:
+          type: string
+        itemType:
+          type: string
+        itemStatus:
+          $ref: "#/components/schemas/ItemStatus"
+        lastDateModified:
+          $ref: "#/components/schemas/IsoDateTime"
+        parent:
+          type: string
+          nullable: true
+        customFields:
+          oneOf:
+            - type: array
+              items: { type: object, additionalProperties: true }
+            - type: object
+              additionalProperties: true
+          nullable: true
+    PaginatedItems:
+      type: object
+      required: [totalRecords, recordsFiltered, pageSize, currentPage, records]
+      properties:
+        totalRecords: { type: integer }
+        recordsFiltered: { type: integer }
+        pageSize: { type: integer }
+        currentPage: { type: integer }
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/Item"
+    GetItemsResponse:
+      type: object
+      required: [success, description, data]
+      properties:
+        success: { type: boolean, example: true }
+        description: { type: string }
+        errors:
+          type: array
+          items: { type: string }
+          nullable: true
+        data:
+          $ref: "#/components/schemas/PaginatedItems"
+    UomType:
+      type: integer
+      enum: [0, 2]
+      description: 0 = Standard, 2 = Case
+    PhoneOrderAddress:
+      type: object
+      properties:
+        address1: { type: string }
+        address2: { type: string }
+        city: { type: string }
+        state: { type: string }
+        zipCode: { type: string }
+        country: { type: string }
+        phone1: { type: string }
+        phone2: { type: string }
+    PhoneOrderShippingAddress:
+      type: object
+      description: Note PascalCase keys — required by the upstream API.
+      properties:
+        Address1: { type: string }
+        Address2: { type: string }
+        City: { type: string }
+        State: { type: string }
+        ZipCode: { type: string }
+        Country: { type: string }
+        Phone1: { type: string }
+        Phone2: { type: string }
+    PhoneOrderDetail:
+      type: object
+      required: [barCode, qty, uomType, sortOrder]
+      properties:
+        barCode: { type: string }
+        qty: { type: number }
+        uomType:
+          $ref: "#/components/schemas/UomType"
+        note: { type: string }
+        sortOrder: { type: integer, minimum: 1 }
+    CreatePhoneOrderRequest:
+      type: object
+      required:
+        [storeID, customerNo, firstName, lastName, address, phoneOrderType, orderDetails]
+      properties:
+        storeID: { type: integer }
+        customerNo: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        address:
+          $ref: "#/components/schemas/PhoneOrderAddress"
+        CustomerShippingAddress:
+          type: array
+          items:
+            $ref: "#/components/schemas/PhoneOrderShippingAddress"
+        driversNote: { type: string }
+        customerNote: { type: string }
+        paymentNote: { type: string }
+        phoneOrderDate:
+          $ref: "#/components/schemas/IsoDateTime"
+        phoneOrderTime: { type: string }
+        deliveryDate:
+          $ref: "#/components/schemas/IsoDateTime"
+        phoneOrderType: { type: string }
+        TakenBy: { type: string }
+        Shift: { type: string }
+        tenderName: { type: string }
+        orderDetails:
+          type: array
+          items:
+            $ref: "#/components/schemas/PhoneOrderDetail"
+    CreatePhoneOrderResponse:
+      type: object
+      required: [success, description, data]
+      properties:
+        success: { type: boolean }
+        description: { type: string }
+        errors:
+          type: array
+          items: { type: string }
+          nullable: true
+        data:
+          type: object
+          required: [phoneOrderNo]
+          properties:
+            phoneOrderNo: { type: string }
+    CustomerStatus:
+      type: string
+      enum: [Active, Inactive]
+    CustomerFilter:
+      type: object
+      properties:
+        customerNo: { type: string, nullable: true }
+        lastName: { type: string, nullable: true }
+        firstName: { type: string, nullable: true }
+        email: { type: string, nullable: true }
+        dateCreatedFrom:
+          $ref: "#/components/schemas/IsoDateTime"
+        dateCreatedTo:
+          $ref: "#/components/schemas/IsoDateTime"
+        dateModifiedFrom:
+          $ref: "#/components/schemas/IsoDateTime"
+        dateModifiedTo:
+          $ref: "#/components/schemas/IsoDateTime"
+        phoneNumber1: { type: string, nullable: true }
+        phoneNumber2: { type: string, nullable: true }
+    GetCustomersRequest:
+      allOf:
+        - $ref: "#/components/schemas/PaginatedRequestBase"
+        - type: object
+          required: [customerFilter]
+          properties:
+            customerFilter:
+              $ref: "#/components/schemas/CustomerFilter"
+    Customer:
+      type: object
+      properties:
+        customerIdNumeric: { type: integer }
+        customerId: { type: string }
+        customerNo: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, nullable: true }
+        mainAddressId: { type: string, nullable: true }
+        addresses:
+          type: array
+          items: { type: object, additionalProperties: true }
+        status:
+          $ref: "#/components/schemas/CustomerStatus"
+        dateCreated:
+          $ref: "#/components/schemas/IsoDateTime"
+        dateModified:
+          $ref: "#/components/schemas/IsoDateTime"
+        accountStatus: { type: string }
+        balanceDue: { type: number }
+    PaginatedCustomers:
+      type: object
+      properties:
+        totalRecords: { type: integer }
+        recordsFiltered: { type: integer }
+        pageSize: { type: integer }
+        currentPage: { type: integer }
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/Customer"
+    GetCustomersResponse:
+      type: object
+      required: [success, description, data]
+      properties:
+        success: { type: boolean }
+        description: { type: string }
+        errors:
+          type: array
+          items: { type: string }
+          nullable: true
+        data:
+          $ref: "#/components/schemas/PaginatedCustomers"
+paths:
+  /api/OpenAPI/GetItems:
+    post:
+      summary: Paginated item list with filters
+      operationId: getItems
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GetItemsRequest"
+      responses:
+        "200":
+          description: Item page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetItemsResponse"
+        default:
+          description: Error envelope or HTTP failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/OpenAPI/CreatePhoneOrder:
+    post:
+      summary: Create a phone order
+      operationId: createPhoneOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePhoneOrderRequest"
+      responses:
+        "200":
+          description: Created order number
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatePhoneOrderResponse"
+        default:
+          description: Error envelope or HTTP failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /api/Customers/GetCustomers:
+    post:
+      summary: Paginated customer list with filters
+      operationId: getCustomers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GetCustomersRequest"
+      responses:
+        "200":
+          description: Customer page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetCustomersResponse"
+        default:
+          description: Error envelope or HTTP failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"

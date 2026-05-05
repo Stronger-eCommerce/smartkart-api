@@ -31,6 +31,20 @@ export interface GetItemsRequest extends PaginatedRequestBase {
 }
 
 /**
+ * Public input for {@link SmartKartClient.getItems}. `storeID` is optional
+ * here because the client falls back to its `defaultStoreId` when omitted.
+ */
+export interface GetItemsInput extends PaginatedRequestBase {
+  itemsFilter: Omit<ItemsFilter, "storeID"> & { storeID?: number };
+}
+
+/**
+ * Filter for {@link SmartKartClient.getAllItems}. Identical to
+ * {@link ItemsFilter} but with optional `storeID` (falls back to client default).
+ */
+export type ItemsFilterInput = Omit<ItemsFilter, "storeID"> & { storeID?: number };
+
+/**
  * Item custom field as returned by the API. The exact shape isn't fully
  * documented; we model the most likely fields and keep an index signature
  * so unknown fields are surfaced rather than silently dropped.

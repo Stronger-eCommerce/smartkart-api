@@ -1,17 +1,33 @@
 import { SmartKartApiError } from "./errors.js";
 import type {
+  Logger,
+  PaginationOptions,
+  RequestOptions,
+  RetryOptions,
+} from "./request-options.js";
+import type {
   ApiResponse,
   CreatePhoneOrderData,
+  CreatePhoneOrderInput,
   CreatePhoneOrderRequest,
+  Customer,
+  CustomerFilter,
   GetCustomersRequest,
+  GetItemsInput,
   GetItemsRequest,
   Item,
-  Customer,
+  ItemsFilterInput,
   PaginatedData,
 } from "./types/index.js";
 
 /** Default base URL — note the typo ("Connectros") matches the official docs. */
 export const DEFAULT_BASE_URL = "http://rdtapi.com/RDTConnectrosAPI";
+
+/** Default request timeout (30 seconds). */
+export const DEFAULT_TIMEOUT_MS = 30_000;
+
+/** Default page size for pagination iterators. */
+export const DEFAULT_PAGE_SIZE = 100;
 
 /**
  * Endpoint paths, kept here so callers can tweak/override them if SmartKart
@@ -51,6 +67,37 @@ export interface SmartKartClientOptions {
    * Extra headers to attach to every request (e.g., for tracing).
    */
   defaultHeaders?: Record<string, string>;
+  /**
+   * Default per-request timeout in milliseconds. Pass `0` to disable.
+   * @default 30000
+   */
+  defaultTimeoutMs?: number;
+  /**
+   * Default retry policy for transient failures. Set to `false` to disable
+   * retries entirely. By default, retries up to 3 attempts on network
+   * errors, 408, 425, 429, and 5xx responses with exponential backoff.
+   */
+  retry?: RetryOptions | false;
+  /**
+   * Optional logger for debug/warn output (request URLs, retry attempts,
+   * timeout fires, etc.). Compatible with `console` and `pino`.
+   */
+  logger?: Logger;
+}
+
+const DEFAULT_RETRY: Required<Omit<RetryOptions, "retryOn">> = {
+  attempts: 3,
+  baseDelayMs: 250,
+  maxDelayMs: 5_000,
+};
+
+/**
+ * Default retry predicate: retry network errors (status 0) and the usual
+ * transient HTTP conditions.
+ */
+function defaultRetryOn(info: { status: number }): boolean {
+  const { status } = info;
+  return status === 0 || status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 /**
@@ -81,6 +128,9 @@ export class SmartKartClient {
   private readonly defaultStoreId?: number;
   private readonly endpoints: typeof ENDPOINTS;
   private readonly defaultHeaders: Record<string, string>;
+  private readonly defaultTimeoutMs: number;
+  private readonly defaultRetry: RetryOptions | false;
+  private readonly logger?: Logger;
 
   constructor(options: SmartKartClientOptions) {
     if (!options.token) {
@@ -101,6 +151,9 @@ export class SmartKartClient {
     this.defaultStoreId = options.defaultStoreId;
     this.endpoints = { ...ENDPOINTS, ...(options.endpoints ?? {}) };
     this.defaultHeaders = { ...(options.defaultHeaders ?? {}) };
+    this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.defaultRetry = options.retry ?? {};
+    this.logger = options.logger;
   }
 
   // ---------------------------------------------------------------------------
@@ -114,11 +167,22 @@ export class SmartKartClient {
    *
    * Per the SmartKart changelog, leaving `itemStatus` as `null` (or omitted)
    * loads ALL items — pass `"Active"` or `"Inactive"` to narrow.
+   *
+   * @throws {SmartKartApiError} on HTTP failure, `success: false`, network
+   *   errors, or timeouts.
+   *
+   * @example
+   * ```ts
+   * const page = await sk.getItems({
+   *   pageSize: 50,
+   *   pageNumber: 1,
+   *   itemsFilter: { itemStatus: "Active" },
+   * }, { timeoutMs: 60_000 });
+   * ```
    */
   async getItems(
-    request: GetItemsRequest | Omit<GetItemsRequest, "itemsFilter"> & {
-      itemsFilter: Omit<GetItemsRequest["itemsFilter"], "storeID"> & { storeID?: number };
-    },
+    request: GetItemsInput,
+    options?: RequestOptions,
   ): Promise<PaginatedData<Item>> {
     const storeID = request.itemsFilter.storeID ?? this.defaultStoreId;
     if (storeID === undefined) {
@@ -137,8 +201,49 @@ export class SmartKartClient {
     const res = await this.post<ApiResponse<PaginatedData<Item>>>(
       this.endpoints.getItems,
       body,
+      options,
     );
     return res.data;
+  }
+
+  /**
+   * Stream every item matching `filter` across pages, yielding records one
+   * at a time. Handles pagination automatically; stops once a short page
+   * (or `maxPages`) is reached.
+   *
+   * @example
+   * ```ts
+   * for await (const item of sk.getAllItems({ itemStatus: "Active" })) {
+   *   console.log(item.itemID);
+   * }
+   * ```
+   */
+  async *getAllItems(
+    filter: ItemsFilterInput = {},
+    options?: PaginationOptions & RequestOptions,
+  ): AsyncIterableIterator<Item> {
+    const pageSize = options?.pageSize ?? DEFAULT_PAGE_SIZE;
+    const startPage = options?.startPage ?? 1;
+    const maxPages = options?.maxPages;
+    const requestOpts: RequestOptions = {
+      signal: options?.signal,
+      timeoutMs: options?.timeoutMs,
+      retry: options?.retry,
+      logger: options?.logger,
+    };
+
+    for (let page = startPage; ; page++) {
+      if (maxPages !== undefined && page - startPage >= maxPages) return;
+
+      const result = await this.getItems(
+        { pageSize, pageNumber: page, itemsFilter: filter },
+        requestOpts,
+      );
+      for (const record of result.records) {
+        yield record;
+      }
+      if (result.records.length < pageSize) return;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -150,11 +255,30 @@ export class SmartKartClient {
    * envelope on success.
    *
    * `storeID` falls back to `defaultStoreId` if not provided.
+   *
+   * Note: the API expects **PascalCase** keys on `CustomerShippingAddress`
+   * (`Address1`, `Phone1`, ...) but **camelCase** on `address`. The types
+   * preserve that distinction — don't mix them.
+   *
+   * @throws {SmartKartApiError} on HTTP failure or `success: false`.
+   *
+   * @example
+   * ```ts
+   * const { phoneOrderNo } = await sk.createPhoneOrder({
+   *   customerNo: "(123)456-7890",
+   *   firstName: "John",
+   *   lastName: "Doe",
+   *   address: { phone1: "(718)782-4608" },
+   *   phoneOrderType: "MyApp",
+   *   orderDetails: [
+   *     { barCode: "0376", qty: 2, uomType: UomType.Standard, sortOrder: 1 },
+   *   ],
+   * });
+   * ```
    */
   async createPhoneOrder(
-    request:
-      | CreatePhoneOrderRequest
-      | (Omit<CreatePhoneOrderRequest, "storeID"> & { storeID?: number }),
+    request: CreatePhoneOrderInput,
+    options?: RequestOptions,
   ): Promise<CreatePhoneOrderData> {
     const storeID = request.storeID ?? this.defaultStoreId;
     if (storeID === undefined) {
@@ -169,6 +293,7 @@ export class SmartKartClient {
     const res = await this.post<ApiResponse<CreatePhoneOrderData>>(
       this.endpoints.createPhoneOrder,
       body,
+      options,
     );
     return res.data;
   }
@@ -177,13 +302,68 @@ export class SmartKartClient {
   // Customers
   // ---------------------------------------------------------------------------
 
-  /** Fetch a paginated list of customers with optional filters. */
-  async getCustomers(request: GetCustomersRequest): Promise<PaginatedData<Customer>> {
+  /**
+   * Fetch a paginated list of customers with optional filters.
+   *
+   * @throws {SmartKartApiError} on HTTP failure or `success: false`.
+   *
+   * @example
+   * ```ts
+   * const { records } = await sk.getCustomers({
+   *   pageSize: 50,
+   *   pageNumber: 1,
+   *   customerFilter: { customerNo: "(718)782-4608" },
+   * });
+   * ```
+   */
+  async getCustomers(
+    request: GetCustomersRequest,
+    options?: RequestOptions,
+  ): Promise<PaginatedData<Customer>> {
     const res = await this.post<ApiResponse<PaginatedData<Customer>>>(
       this.endpoints.getCustomers,
       request,
+      options,
     );
     return res.data;
+  }
+
+  /**
+   * Stream every customer matching `filter` across pages.
+   *
+   * @example
+   * ```ts
+   * for await (const c of sk.getAllCustomers({ lastName: "Doe" })) {
+   *   console.log(c.customerNo);
+   * }
+   * ```
+   */
+  async *getAllCustomers(
+    filter: CustomerFilter = {},
+    options?: PaginationOptions & RequestOptions,
+  ): AsyncIterableIterator<Customer> {
+    const pageSize = options?.pageSize ?? DEFAULT_PAGE_SIZE;
+    const startPage = options?.startPage ?? 1;
+    const maxPages = options?.maxPages;
+    const requestOpts: RequestOptions = {
+      signal: options?.signal,
+      timeoutMs: options?.timeoutMs,
+      retry: options?.retry,
+      logger: options?.logger,
+    };
+
+    for (let page = startPage; ; page++) {
+      if (maxPages !== undefined && page - startPage >= maxPages) return;
+
+      const result = await this.getCustomers(
+        { pageSize, pageNumber: page, customerFilter: filter },
+        requestOpts,
+      );
+      for (const record of result.records) {
+        yield record;
+      }
+      if (result.records.length < pageSize) return;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -194,10 +374,80 @@ export class SmartKartClient {
    * Lower-level POST helper. Exposed for forward-compatibility if SmartKart
    * adds an endpoint that isn't wrapped here yet.
    *
+   * Honours `signal`, `timeoutMs`, and `retry` from {@link RequestOptions}.
    * Throws `SmartKartApiError` on non-2xx responses or `success: false`.
    */
-  async post<T extends ApiResponse<unknown>>(path: string, body: unknown): Promise<T> {
+  async post<T extends ApiResponse<unknown>>(
+    path: string,
+    body: unknown,
+    options?: RequestOptions,
+  ): Promise<T> {
     const url = `${this.baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+    const logger = options?.logger ?? this.logger;
+
+    const retryConfig = this.resolveRetry(options?.retry);
+    const totalAttempts = retryConfig === false ? 1 : retryConfig.attempts ?? DEFAULT_RETRY.attempts;
+    const retryOn =
+      retryConfig === false ? () => false : retryConfig.retryOn ?? defaultRetryOn;
+
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+      // Honor caller cancellation between attempts.
+      if (options?.signal?.aborted) {
+        throw options.signal.reason ?? new Error("SmartKartClient: request aborted");
+      }
+
+      try {
+        const result = await this.executeRequest<T>(url, path, body, options, logger);
+        if (attempt > 1) {
+          logger?.debug?.("smartkart request succeeded after retry", { path, attempt });
+        }
+        return result;
+      } catch (err) {
+        lastError = err;
+
+        const status = err instanceof SmartKartApiError ? err.status : -1;
+        const isLastAttempt = attempt === totalAttempts;
+        const aborted = options?.signal?.aborted === true;
+
+        if (isLastAttempt || aborted || !retryOn({ status, attempt, error: err })) {
+          throw err;
+        }
+
+        const delayMs = computeBackoff(attempt, retryConfig === false ? DEFAULT_RETRY : retryConfig);
+        logger?.warn?.("smartkart request failed, retrying", {
+          path,
+          attempt,
+          totalAttempts,
+          status,
+          delayMs,
+        });
+        await sleep(delayMs, options?.signal);
+      }
+    }
+
+    // Unreachable under normal control flow, but keeps TS happy.
+    throw lastError ?? new Error("SmartKartClient: retry loop exited unexpectedly");
+  }
+
+  private resolveRetry(perRequest: RequestOptions["retry"]): RetryOptions | false {
+    if (perRequest === false) return false;
+    if (this.defaultRetry === false && perRequest === undefined) return false;
+    const base = this.defaultRetry === false ? {} : this.defaultRetry;
+    return { ...base, ...(perRequest ?? {}) };
+  }
+
+  private async executeRequest<T extends ApiResponse<unknown>>(
+    url: string,
+    path: string,
+    body: unknown,
+    options: RequestOptions | undefined,
+    logger: Logger | undefined,
+  ): Promise<T> {
+    const timeoutMs = options?.timeoutMs ?? this.defaultTimeoutMs;
+    const { signal, cleanup, didTimeout } = mergeSignals(options?.signal, timeoutMs);
+
+    logger?.debug?.("smartkart request", { path, timeoutMs });
 
     let response: Response;
     try {
@@ -210,13 +460,19 @@ export class SmartKartClient {
           Accept: "application/json",
         },
         body: JSON.stringify(body),
+        signal,
       });
     } catch (cause) {
+      const timedOut = didTimeout();
       throw new SmartKartApiError({
-        message: `SmartKart API network error calling ${path}: ${(cause as Error)?.message ?? cause}`,
+        message: timedOut
+          ? `SmartKart API request timed out after ${timeoutMs}ms (${path})`
+          : `SmartKart API network error calling ${path}: ${(cause as Error)?.message ?? cause}`,
         status: 0,
         endpoint: path,
       });
+    } finally {
+      cleanup();
     }
 
     const rawText = await response.text();
@@ -272,4 +528,74 @@ function isApiResponse(value: unknown): value is ApiResponse<unknown> {
     "success" in value &&
     typeof (value as { success: unknown }).success === "boolean"
   );
+}
+
+function computeBackoff(
+  attempt: number,
+  retry: RetryOptions,
+): number {
+  const base = retry.baseDelayMs ?? DEFAULT_RETRY.baseDelayMs;
+  const max = retry.maxDelayMs ?? DEFAULT_RETRY.maxDelayMs;
+  const exp = base * 2 ** (attempt - 1);
+  const jitter = Math.random() * base;
+  return Math.min(max, Math.floor(exp + jitter));
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error("aborted"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error("aborted"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Merge a caller-provided signal with an internal timeout, returning a
+ * single composite signal plus a cleanup function and a `didTimeout()`
+ * helper used to format better error messages.
+ *
+ * Avoids `AbortSignal.any` so this works on every Node 18+ runtime.
+ */
+function mergeSignals(
+  external: AbortSignal | undefined,
+  timeoutMs: number,
+): { signal: AbortSignal; cleanup: () => void; didTimeout: () => boolean } {
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  if (external?.aborted) {
+    controller.abort(external.reason);
+  }
+
+  const onExternalAbort = () => {
+    controller.abort(external?.reason);
+  };
+  external?.addEventListener("abort", onExternalAbort);
+
+  if (timeoutMs > 0) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new Error(`SmartKartClient: request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      if (timer !== undefined) clearTimeout(timer);
+      external?.removeEventListener("abort", onExternalAbort);
+    },
+    didTimeout: () => timedOut,
+  };
 }

@@ -1,9 +1,27 @@
 /**
  * Error thrown by `SmartKartClient` for both:
- *   - non-2xx HTTP responses, and
- *   - 2xx responses where the API envelope reports `success: false`.
+ *   - non-2xx HTTP responses,
+ *   - 2xx responses where the API envelope reports `success: false`, and
+ *   - network errors / timeouts (where `status === 0`).
  *
  * Inspect `status`, `apiDescription`, and `apiErrors` to distinguish cases.
+ *
+ * @example
+ * ```ts
+ * try {
+ *   await sk.getItems({ pageSize: 30, pageNumber: 1, itemsFilter: {} });
+ * } catch (err) {
+ *   if (isSmartKartApiError(err)) {
+ *     if (err.status === 0) {
+ *       // network error or timeout
+ *     } else if (err.status >= 500) {
+ *       // server error
+ *     } else {
+ *       console.error(err.endpoint, err.apiDescription, err.apiErrors);
+ *     }
+ *   }
+ * }
+ * ```
  */
 export class SmartKartApiError extends Error {
   /** HTTP status code (e.g. 200 when the API returned `success: false` with 200, 401, 500, ...). */
@@ -33,4 +51,37 @@ export class SmartKartApiError extends Error {
     this.apiErrors = options.apiErrors;
     this.rawBody = options.rawBody;
   }
+}
+
+/**
+ * Cross-realm safe `instanceof` replacement for {@link SmartKartApiError}.
+ *
+ * Use this in consumer code instead of `err instanceof SmartKartApiError`
+ * when the error might cross module boundaries (e.g. dual ESM/CJS package
+ * graphs, Jest module mocking, or workers), where `instanceof` can yield
+ * false negatives.
+ *
+ * @example
+ * ```ts
+ * import { isSmartKartApiError } from "@stronger-ecommerce/smartkart-api";
+ *
+ * try {
+ *   await sk.getItems({ ... });
+ * } catch (err) {
+ *   if (isSmartKartApiError(err)) {
+ *     console.error(err.endpoint, err.status, err.apiDescription);
+ *   } else {
+ *     throw err;
+ *   }
+ * }
+ * ```
+ */
+export function isSmartKartApiError(value: unknown): value is SmartKartApiError {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as { name?: unknown; status?: unknown; endpoint?: unknown };
+  return (
+    v.name === "SmartKartApiError" &&
+    typeof v.status === "number" &&
+    typeof v.endpoint === "string"
+  );
 }

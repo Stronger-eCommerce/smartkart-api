@@ -1,0 +1,96 @@
+---
+description: Conventions for using the @stronger-ecommerce/smartkart-api client.
+globs:
+  - "**/*.ts"
+  - "**/*.tsx"
+  - "**/*.js"
+alwaysApply: false
+---
+
+# `@stronger-ecommerce/smartkart-api` usage rules
+
+Apply these when reading, writing, or editing code that imports from `@stronger-ecommerce/smartkart-api` or `smartkart-api`.
+
+## Construction
+
+- Construct **one** `SmartKartClient` per process and reuse it. Don't instantiate per request.
+- Always pass `defaultStoreId` on the client unless the calling code legitimately needs to switch stores per request.
+- Read the token from `process.env.SMARTKART_API_TOKEN` (or the platform's secret store). Never hard-code tokens.
+
+```ts
+import { SmartKartClient } from "@stronger-ecommerce/smartkart-api";
+
+const sk = new SmartKartClient({
+  token: process.env.SMARTKART_API_TOKEN!,
+  defaultStoreId: Number(process.env.SMARTKART_STORE_ID),
+});
+```
+
+## Error handling
+
+- Use `isSmartKartApiError(err)` instead of `err instanceof SmartKartApiError`. `instanceof` is unreliable across module boundaries (dual ESM/CJS, workers, mocked modules).
+- Inspect `err.apiDescription` and `err.apiErrors` for the human-readable cause. `err.message` is just a wrapper string.
+- `err.status === 0` means a network error or timeout.
+
+```ts
+import { isSmartKartApiError } from "@stronger-ecommerce/smartkart-api";
+
+try {
+  await sk.getItems({ pageSize: 30, pageNumber: 1, itemsFilter: { itemStatus: "Active" } });
+} catch (err) {
+  if (isSmartKartApiError(err)) {
+    if (err.status === 0) {
+      // network/timeout: safe to retry
+    } else if (err.status >= 500) {
+      // server error
+    } else {
+      // 4xx or success:false — fix the request
+    }
+  } else {
+    throw err;
+  }
+}
+```
+
+## Pagination
+
+- Prefer the streaming iterators (`getAllItems`, `getAllCustomers`) over hand-rolling page loops. They handle the loop, page-size logic, and the short-final-page termination.
+- Pass a `maxPages` cap when the upstream dataset could be huge.
+
+```ts
+for await (const item of sk.getAllItems({ itemStatus: "Active" }, { pageSize: 200, maxPages: 50 })) {
+  // ...
+}
+```
+
+## Cancellation and timeouts
+
+- For long-running workflows or user-facing requests, pass an `AbortSignal`:
+
+```ts
+const ac = new AbortController();
+const items = await sk.getItems(req, { signal: ac.signal, timeoutMs: 60_000 });
+```
+
+- Default timeout is 30s. Bump it for slow-moving endpoints; pass `timeoutMs: 0` to disable.
+
+## Phone orders
+
+The API mixes naming conventions. Use exactly:
+
+- `address` — **camelCase** keys (`address1`, `phone1`, ...). This is the customer's main/billing address.
+- `CustomerShippingAddress` — array of objects with **PascalCase** keys (`Address1`, `Phone1`, ...). Used to ship to a different address.
+
+Don't normalise either. The wire format requires the casing as-is.
+
+## Constants
+
+- `UomType.Standard` (0) and `UomType.Case` (2) — never pass raw numbers.
+- `CustomerNoteType` and `CustomerAddressType` are exported and should be used over raw strings/numbers.
+
+## What NOT to do
+
+- Don't read `.success` on responses — successful methods return the unwrapped `data` directly. `success: false` throws.
+- Don't set `Token` in `defaultHeaders` — it's already attached.
+- Don't add `Content-Type` / `Accept` headers — they're set automatically.
+- Don't fix the `Connectros` typo in `DEFAULT_BASE_URL`. It matches the upstream API and changing it will break every request.

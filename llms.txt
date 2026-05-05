@@ -1,0 +1,49 @@
+# @stronger-ecommerce/smartkart-api
+
+> Typed TypeScript client for the SmartKart (RDT Connectors) point-of-sale API. Wraps the GetItems, CreatePhoneOrder, and GetCustomers endpoints with full types, retry, timeout, AbortSignal, pagination iterators, and rich error reporting.
+
+The client is a single class `SmartKartClient` configured with a token (sent as the `Token` header). Every method returns the unwrapped `data` payload from the SmartKart envelope and throws `SmartKartApiError` on HTTP failure, `success: false`, network errors, or timeouts.
+
+Runtime requirements: Node 18+ (or any environment with global `fetch`). Pass `options.fetch` to use on older Node or to customise.
+
+## Docs
+
+- [Full API reference](llms-full.txt): every public symbol, type, and example.
+- [README](README.md): install, quick start, error handling, Gadget integration.
+- [AGENTS.md](AGENTS.md): guidance for agents modifying this repo.
+- [GitHub repo](https://github.com/Stronger-eCommerce/smartkart-api)
+
+## Public API surface
+
+- `SmartKartClient` — constructor takes `{ token, baseUrl?, fetch?, defaultStoreId?, endpoints?, defaultHeaders?, defaultTimeoutMs?, retry?, logger? }`.
+- `client.getItems(input, options?)` — paginated item list. Returns `PaginatedData<Item>`.
+- `client.getAllItems(filter?, options?)` — async iterator over every matching item across pages.
+- `client.createPhoneOrder(input, options?)` — creates a phone order. Returns `{ phoneOrderNo }`.
+- `client.getCustomers(input, options?)` — paginated customer list. Returns `PaginatedData<Customer>`.
+- `client.getAllCustomers(filter?, options?)` — async iterator over every matching customer.
+- `client.post(path, body, options?)` — lower-level POST helper for forward-compatibility.
+- `SmartKartApiError` — thrown error type with `status`, `endpoint`, `apiDescription`, `apiErrors`, `rawBody`.
+- `isSmartKartApiError(value)` — cross-realm safe type guard, prefer over `instanceof`.
+
+## Per-request options
+
+Every method accepts an optional `RequestOptions` last argument:
+
+- `signal: AbortSignal` — cancellation.
+- `timeoutMs: number` — override default timeout (30s). `0` disables.
+- `retry: RetryOptions | false` — override retry policy. Default retries 3 attempts with exponential backoff on network errors, 408, 425, 429, and 5xx.
+- `logger: { debug?, warn? }` — per-request logger override.
+
+## Constants
+
+- `UomType` — `Standard` (0), `Case` (2)
+- `CustomerNoteType` — `"0"` Internal | `"1"` ForCustomer | `"2"` ForCashier | `"3"` PhoneOrder | `"4"` All
+- `CustomerAddressType.Main` — `6`
+- `DEFAULT_BASE_URL` — `"http://rdtapi.com/RDTConnectrosAPI"` (typo intentional)
+- `DEFAULT_TIMEOUT_MS` — `30000`
+- `DEFAULT_PAGE_SIZE` — `100`
+- `ENDPOINTS` — `{ getItems, createPhoneOrder, getCustomers }` paths.
+
+## Naming gotcha
+
+`CustomerShippingAddress` on `createPhoneOrder` uses **PascalCase** keys (`Address1`, `Phone1`) while the `address` field uses **camelCase** (`address1`, `phone1`). This matches the upstream API exactly — don't normalise.

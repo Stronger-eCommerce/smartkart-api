@@ -98,6 +98,15 @@ export interface CreatePhoneOrderRequest {
   orderDetails: PhoneOrderDetail[];
 }
 
+/**
+ * Public input for {@link SmartKartClient.createPhoneOrder}. `storeID` is
+ * optional here because the client falls back to its `defaultStoreId` when
+ * omitted.
+ */
+export type CreatePhoneOrderInput = Omit<CreatePhoneOrderRequest, "storeID"> & {
+  storeID?: number;
+};
+
 export interface CreatePhoneOrderData {
   phoneOrderNo: string;
 }

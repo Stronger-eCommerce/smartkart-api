@@ -1,0 +1,209 @@
+# @stronger-ecommerce/smartkart-api - Full Reference
+
+Typed TypeScript client for the SmartKart (RDT Connectors) point-of-sale API. Designed for use in Node 18+, modern browsers, Bun, Cloudflare Workers, and Gadget apps.
+
+## Install
+
+```bash
+npm install @stronger-ecommerce/smartkart-api
+```
+
+## Construction
+
+```ts
+import { SmartKartClient } from "@stronger-ecommerce/smartkart-api";
+
+const sk = new SmartKartClient({
+  token: process.env.SMARTKART_API_TOKEN!, // sent as the `Token` header on every request
+  defaultStoreId: 42,                      // optional fallback storeID
+  baseUrl: "http://rdtapi.com/RDTConnectrosAPI", // default; note typo matches upstream
+  defaultTimeoutMs: 30_000,                // default 30s; 0 disables
+  retry: { attempts: 3, baseDelayMs: 250, maxDelayMs: 5_000 }, // default
+  logger: { debug: console.debug, warn: console.warn },        // optional
+  fetch: customFetch,                      // optional (defaults to globalThis.fetch)
+  defaultHeaders: { "X-Trace": "abc" },    // optional, attached to every request
+  endpoints: { getItems: "/api/v2/GetItems" }, // optional path overrides
+});
+```
+
+`token` is required. Throws synchronously if missing or if no fetch implementation is available.
+
+## SmartKartClientOptions
+
+| Field              | Type                              | Default                           | Notes                                              |
+| ------------------ | --------------------------------- | --------------------------------- | -------------------------------------------------- |
+| `token`            | `string`                          | required                          | Sent as the `Token` header.                        |
+| `baseUrl`          | `string`                          | `DEFAULT_BASE_URL`                | Trailing slashes are stripped.                     |
+| `fetch`            | `FetchLike`                       | `globalThis.fetch`                | Pass a polyfill on older Node or for testing.      |
+| `defaultStoreId`   | `number`                          | -                                 | Used when a request omits `storeID`.               |
+| `endpoints`        | `Partial<typeof ENDPOINTS>`       | `ENDPOINTS`                       | Per-method path override.                          |
+| `defaultHeaders`   | `Record<string, string>`          | `{}`                              | Merged into every request.                         |
+| `defaultTimeoutMs` | `number`                          | `30000`                           | `0` disables timeouts.                             |
+| `retry`            | `RetryOptions \| false`           | `{ attempts: 3, ... }`            | `false` disables retries entirely.                 |
+| `logger`           | `Logger`                          | -                                 | `{ debug?, warn? }`. Compatible with `console`.    |
+
+## Per-request `RequestOptions`
+
+Every public method accepts an optional final argument of type `RequestOptions`:
+
+| Field       | Type                       | Notes                                                          |
+| ----------- | -------------------------- | -------------------------------------------------------------- |
+| `signal`    | `AbortSignal`              | Cancellation. Honoured immediately if already aborted.         |
+| `timeoutMs` | `number`                   | Override default. Pass `0` to disable for this request only.   |
+| `retry`     | `RetryOptions \| false`    | Per-request override. `false` disables retries for this call.  |
+| `logger`    | `Logger`                   | Per-request logger override.                                   |
+
+`RetryOptions`:
+
+| Field          | Type                                                    | Default                                  |
+| -------------- | ------------------------------------------------------- | ---------------------------------------- |
+| `attempts`     | `number`                                                | `3`                                      |
+| `baseDelayMs`  | `number`                                                | `250`                                    |
+| `maxDelayMs`   | `number`                                                | `5000`                                   |
+| `retryOn`      | `(info) => boolean`                                     | retries on `0`, `408`, `425`, `429`, 5xx |
+
+Backoff is `min(maxDelayMs, baseDelayMs * 2^(attempt-1) + random*baseDelayMs)`.
+
+## Methods
+
+### `getItems(input, options?) -> Promise<PaginatedData<Item>>`
+
+```ts
+const page = await sk.getItems({
+  pageSize: 100,
+  pageNumber: 1,
+  itemsFilter: {
+    // storeID optional — falls back to client's defaultStoreId
+    itemStatus: "Active",                  // "Active" | "Inactive" | null
+    lastDateModified: "2026-01-01T00:00:00",
+  },
+});
+```
+
+Returns `{ totalRecords, recordsFiltered, pageSize, currentPage, records: Item[] }`. Each `Item` has explicit fields for documented properties (`itemID`, `name`, `upc`, `parent`, `customFields`, ...) and an index signature so undocumented fields are surfaced rather than dropped.
+
+### `getAllItems(filter?, options?) -> AsyncIterableIterator<Item>`
+
+Streams every matching item across pages. Stops when a page returns fewer records than `pageSize` or `maxPages` is hit.
+
+```ts
+for await (const item of sk.getAllItems({ itemStatus: "Active" })) {
+  console.log(item.itemID);
+}
+```
+
+`options` extends `RequestOptions` with: `pageSize` (default 100), `startPage` (default 1), `maxPages` (optional safety cap).
+
+### `createPhoneOrder(input, options?) -> Promise<{ phoneOrderNo: string }>`
+
+```ts
+const { phoneOrderNo } = await sk.createPhoneOrder({
+  customerNo: "(123)456-7890",
+  firstName: "John",
+  lastName: "Doe",
+  address: { phone1: "(718)782-4608" },           // camelCase
+  CustomerShippingAddress: [                       // PascalCase keys (intentional)
+    { Address1: "1234 5th ave", City: "Brooklyn", State: "NY", ZipCode: "11201" },
+  ],
+  phoneOrderType: "MyApp",
+  TakenBy: "jdoe",
+  Shift: "Day",
+  tenderName: "MyApp",
+  orderDetails: [
+    { barCode: "0376", qty: 2, uomType: UomType.Standard, sortOrder: 1 },
+    { barCode: "894792002959", qty: 1, uomType: UomType.Case, sortOrder: 2 },
+  ],
+});
+```
+
+The PascalCase / camelCase split on `address` vs `CustomerShippingAddress` is upstream-mandated. The types preserve it so the wire payload is correct.
+
+### `getCustomers(input, options?) -> Promise<PaginatedData<Customer>>`
+
+```ts
+const page = await sk.getCustomers({
+  pageSize: 50,
+  pageNumber: 1,
+  customerFilter: { customerNo: "(718)782-4608" },
+});
+```
+
+`Customer` is fully typed including nested `addresses`, `customerNotes`, `groups`, and `creditCardTokens`.
+
+### `getAllCustomers(filter?, options?) -> AsyncIterableIterator<Customer>`
+
+```ts
+for await (const c of sk.getAllCustomers({ lastName: "Doe" })) {
+  console.log(c.customerNo);
+}
+```
+
+### `post<T>(path, body, options?) -> Promise<T>`
+
+Lower-level helper exposed for forward-compatibility if SmartKart adds an endpoint that isn't wrapped here. Honours all `RequestOptions`.
+
+## Error handling
+
+All failure modes throw `SmartKartApiError`:
+
+| `status`  | Cause                                                  |
+| --------- | ------------------------------------------------------ |
+| `0`       | Network error or timeout (check `apiDescription`).     |
+| `4xx`     | Client-side HTTP error (incl. envelope on body).       |
+| `5xx`     | Server-side HTTP error.                                |
+| `>= 200`  | API returned `success: false` despite 2xx.             |
+
+```ts
+import { SmartKartApiError, isSmartKartApiError } from "@stronger-ecommerce/smartkart-api";
+
+try {
+  await sk.getItems({ pageSize: 30, pageNumber: 1, itemsFilter: {} });
+} catch (err) {
+  if (isSmartKartApiError(err)) {
+    // err.status, err.endpoint, err.apiDescription, err.apiErrors, err.rawBody
+  } else {
+    throw err;
+  }
+}
+```
+
+Always prefer `isSmartKartApiError(err)` over `err instanceof SmartKartApiError` because dual ESM/CJS module graphs and worker boundaries can break `instanceof`.
+
+## Cancellation
+
+```ts
+const ac = new AbortController();
+setTimeout(() => ac.abort("user cancelled"), 5_000);
+
+await sk.getItems(req, { signal: ac.signal });
+```
+
+Aborting between retry attempts is honoured — the loop exits immediately.
+
+## Logging
+
+```ts
+const sk = new SmartKartClient({
+  token: "...",
+  logger: {
+    debug: (msg, meta) => console.debug(`[smartkart] ${msg}`, meta),
+    warn: (msg, meta) => console.warn(`[smartkart] ${msg}`, meta),
+  },
+});
+```
+
+Emitted events: `smartkart request`, `smartkart request failed, retrying`, `smartkart request succeeded after retry`.
+
+## Constants
+
+- `DEFAULT_BASE_URL = "http://rdtapi.com/RDTConnectrosAPI"` — note the typo, it's intentional and matches upstream.
+- `DEFAULT_TIMEOUT_MS = 30000`
+- `DEFAULT_PAGE_SIZE = 100`
+- `ENDPOINTS = { getItems, createPhoneOrder, getCustomers }`
+- `UomType.Standard = 0`, `UomType.Case = 2`
+- `CustomerNoteType` — `"0"` Internal, `"1"` ForCustomer, `"2"` ForCashier, `"3"` PhoneOrder, `"4"` All
+- `CustomerAddressType.Main = 6`
+
+## Type exports
+
+`Item`, `ItemsFilter`, `ItemsFilterInput`, `GetItemsRequest`, `GetItemsInput`, `GetItemsResponse`, `ItemStatus`, `ItemCustomField`, `Customer`, `CustomerFilter`, `GetCustomersRequest`, `GetCustomersResponse`, `CustomerAddress`, `CustomerNote`, `CustomerGroup`, `CreditCardToken`, `CustomerStatus`, `CreatePhoneOrderRequest`, `CreatePhoneOrderInput`, `CreatePhoneOrderData`, `CreatePhoneOrderResponse`, `PhoneOrderAddress`, `PhoneOrderShippingAddress`, `PhoneOrderDetail`, `ApiResponse`, `PaginatedData`, `PaginatedRequestBase`, `IsoDateTime`, `RequestOptions`, `RetryOptions`, `PaginationOptions`, `Logger`, `SmartKartClientOptions`, `FetchLike`.
