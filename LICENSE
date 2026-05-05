@@ -1,16 +1,30 @@
-MIT License
+Stronger eCommerce No-Charge License v1.0
 
 Copyright (c) 2026 Stronger eCommerce
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+of this software and associated documentation files (the "Software"), to use,
+copy, modify, and distribute the Software, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1) No Charging / No Monetization Without Permission.
+You may NOT sell, license, sublicense, rent, lease, charge money for, or
+otherwise monetize the Software or any Derivative Works, in whole or in part,
+without prior explicit written permission from Stronger eCommerce.
+
+This prohibition includes (without limitation):
+- selling the Software (including as an npm package or "SDK");
+- offering the Software as part of a paid product or service where access to
+  the Software (or functionality primarily provided by it) is monetized;
+- charging fees for access, use, hosting, or support that is conditioned on
+  receiving the Software.
+
+2) Notice.
+You must include this license text and the copyright notice in all copies or
+substantial portions of the Software.
+
+3) Trademarks.
+This license does not grant permission to use Stronger eCommerce trademarks,
+logos, or brand names.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
