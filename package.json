@@ -37,12 +37,12 @@
   "author": "Jay <jay@strongerecommerce.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/stronger-ecommerce/smartkart-api.git"
+    "url": "git+https://github.com/Stronger-eCommerce/smartkart-api.git"
   },
   "bugs": {
-    "url": "https://github.com/stronger-ecommerce/smartkart-api/issues"
+    "url": "https://github.com/Stronger-eCommerce/smartkart-api/issues"
   },
-  "homepage": "https://github.com/stronger-ecommerce/smartkart-api#readme",
+  "homepage": "https://github.com/Stronger-eCommerce/smartkart-api#readme",
   "publishConfig": {
     "access": "public"
   },
