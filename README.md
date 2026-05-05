@@ -6,7 +6,7 @@ Typed TypeScript client for the [SmartKart](https://smartkartpos.com) (RDT Conne
 
 **One-click installs**
 
-- [Install MCP server in Cursor](cursor://anysphere.cursor-deeplink/mcp/install?name=smartkart&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBzdHJvbmdlci1lY29tbWVyY2Uvc21hcnRrYXJ0LWFwaSIsInNtYXJ0a2FydC1tY3AiXSwiZW52Ijp7IlNNQVJUS0FSVF9BUElfVE9LRU4iOiJZT1VSX1RPS0VOIiwiU01BUlRLQVJUX1NUT1JFX0lEIjoiNDIifX0%3D) (then set `SMARTKART_API_TOKEN`)
+- [![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=smartkart&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBzdHJvbmdlci1lY29tbWVyY2Uvc21hcnRrYXJ0LWFwaSIsInNtYXJ0a2FydC1tY3AiXSwiZW52Ijp7IlNNQVJUS0FSVF9BUElfVE9LRU4iOiJZT1VSX1RPS0VOIiwiU01BUlRLQVJUX1NUT1JFX0lEIjoiNDIifX0%3D)
 - Claude Desktop / other editors: use the JSON snippet in [Use as an MCP server](#use-as-an-mcp-server)
 
 Wraps the three currently-published endpoints, with timeouts, retry-with-backoff, `AbortSignal` cancellation, pagination iterators, and rich error reporting:
