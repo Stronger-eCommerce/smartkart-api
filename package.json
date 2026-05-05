@@ -1,0 +1,56 @@
+{
+  "name": "@stronger-ecommerce/smartkart-api",
+  "version": "0.1.0",
+  "description": "TypeScript client for the SmartKart (RDT Connectors) API",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "README.MD"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "test": "npm run typecheck",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run build",
+    "watch": "tsup src/index.ts --format esm,cjs --dts --watch"
+  },
+  "keywords": [
+    "smartkart",
+    "rdt",
+    "pos",
+    "api",
+    "gadget"
+  ],
+  "license": "MIT",
+  "author": "Jay <jay@strongerecommerce.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stronger-ecommerce/smartkart-api.git"
+  },
+  "bugs": {
+    "url": "https://github.com/stronger-ecommerce/smartkart-api/issues"
+  },
+  "homepage": "https://github.com/stronger-ecommerce/smartkart-api#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "@types/node": "^25.6.0"
+  }
+}
