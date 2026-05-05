@@ -26,7 +26,19 @@ jobs:
       # version for the CI working tree only (no git commit/tag).
       - name: Set canary version
         run: |
-          node -e "const p=require('./package.json'); const base=p.version.replace(/-.*/, ''); const sha=process.env.GITHUB_SHA.slice(0,7); const run=process.env.GITHUB_RUN_NUMBER; const v=`${base}-canary.${run}+${sha}`; require('fs').writeFileSync('package.json', JSON.stringify({...p, version:v}, null, 2) + '\n'); console.log('version=', v);"
+          node <<'NODE'
+          const fs = require("node:fs");
+          const p = require("./package.json");
+          const base = String(p.version).replace(/-.*/, "");
+          const sha = String(process.env.GITHUB_SHA || "").slice(0, 7);
+          const run = String(process.env.GITHUB_RUN_NUMBER || "");
+          const v = `${base}-canary.${run}+${sha}`;
+          fs.writeFileSync(
+            "package.json",
+            JSON.stringify({ ...p, version: v }, null, 2) + "\n"
+          );
+          console.log("version=", v);
+          NODE
 
       - name: Publish canary to npm
         run: npm publish --provenance --access public --tag canary
